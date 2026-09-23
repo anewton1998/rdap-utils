@@ -1,0 +1,30 @@
+[package]
+name = "rdap-utils"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "rdap_utils"
+path = "src/lib.rs"
+
+[[bin]]
+name = "find-ip-networks"
+path = "src/bin/find_ip_networks.rs"
+
+[[bin]]
+name = "find-protected-domains"
+path = "src/bin/find_protected_domains.rs"
+
+[[bin]]
+name = "networks-of-nameservers"
+path = "src/bin/networks_of_nameservers.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+csv = "1.4.0"
+icann-rdap-client = "1.0.0"
+icann-rdap-common = "1.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
