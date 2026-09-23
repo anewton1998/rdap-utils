@@ -30,11 +30,15 @@ pub fn read_items(path: &str, column: Option<&str>) -> Result<Vec<InputEntry>> {
         std::fs::read_to_string(path).with_context(|| format!("failed to read {path}"))?
     };
 
+    // Strip a UTF-8 BOM if present: csv-core strips one for CSV input, but in
+    // plain text it would otherwise be carried into the first item.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
+
     let is_csv = column.is_some() || path.to_ascii_lowercase().ends_with(".csv");
     if is_csv {
-        parse_csv(&content, column)
+        parse_csv(content, column)
     } else {
-        Ok(parse_text(&content).into_iter().map(Ok).collect())
+        Ok(parse_text(content).into_iter().map(Ok).collect())
     }
 }
 
@@ -102,7 +106,13 @@ fn parse_csv(content: &str, column: Option<&str>) -> Result<Vec<InputEntry>> {
     let mut items = Vec::new();
     for (i, row) in reader.records().enumerate() {
         let line = i + 2; // 1-based line number, accounting for the header row
-        let row = row.with_context(|| format!("failed to parse CSV line {line}"))?;
+        let row = match row {
+            Ok(row) => row,
+            Err(e) => {
+                items.push(Err(format!("CSV line {line}: {e}")));
+                break; // csv errors are terminal
+            }
+        };
         match row.get(idx) {
             Some(v) if !v.trim().is_empty() => items.push(Ok(v.trim().to_string())),
             Some(_) => items.push(Err(format!(

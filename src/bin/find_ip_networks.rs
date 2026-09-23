@@ -9,7 +9,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use icann_rdap_common::response::{Cidr0CidrPrefix, Network};
+use icann_rdap_common::response::Network;
 use rdap_utils::input;
 use rdap_utils::output::{self, OutputFormat, Record};
 use rdap_utils::rdap::RdapContext;
@@ -68,16 +68,7 @@ fn cidr_block(net: &Network) -> String {
     net.cidr0_cidrs
         .as_ref()
         .and_then(|c| c.first())
-        .map(|c| {
-            let prefix = match &c.prefix {
-                Some(Cidr0CidrPrefix::V4Prefix(p)) | Some(Cidr0CidrPrefix::V6Prefix(p)) => {
-                    p.clone()
-                }
-                None => String::new(),
-            };
-            let len = c.length.as_ref().map(|l| l.to_string()).unwrap_or_default();
-            format!("{prefix}/{len}")
-        })
+        .map(|c| c.to_string())
         .unwrap_or_default()
 }
 

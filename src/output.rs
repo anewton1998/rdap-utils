@@ -115,6 +115,8 @@ pub fn write_output<R: Record>(
         None => Box::new(std::io::BufWriter::new(std::io::stdout())),
     };
     emit(&mut out, format, rows)?;
+    // Explicit flush: BufWriter's drop-based flush silently swallows I/O errors.
+    out.flush()?;
     Ok(())
 }
 
