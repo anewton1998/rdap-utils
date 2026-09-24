@@ -10,7 +10,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use icann_rdap_common::response::ObjectCommonFields;
+use icann_rdap_common::response::{Domain, ObjectCommonFields};
 use rdap_utils::input;
 use rdap_utils::output::{self, OutputFormat, Record};
 use rdap_utils::rdap::{RdapContext, registrar_name};
@@ -54,6 +54,8 @@ struct ProtectedDomainRow {
     protected: bool,
     status: Vec<String>,
     missing_status: Vec<String>,
+    /// The domain's expiration event date/time (RFC 3339), empty if not reported.
+    expiration_date: String,
     error: String,
 }
 
@@ -64,6 +66,7 @@ impl Record for ProtectedDomainRow {
         "protected",
         "status",
         "missing_status",
+        "expiration_date",
         "error",
     ];
 
@@ -72,11 +75,35 @@ impl Record for ProtectedDomainRow {
             self.domain.clone(),
             self.registrar.clone(),
             self.protected.to_string(),
-            self.status.join("; "),
-            self.missing_status.join("; "),
+            // pipe-separated in CSV; serialized as JSON arrays otherwise
+            self.status.join("|"),
+            self.missing_status.join("|"),
+            self.expiration_date.clone(),
             self.error.clone(),
         ]
     }
+}
+
+/// The domain's expiration event date/time (RFC 3339 string), empty when the
+/// registry does not report an expiration event. Matches both IANA-registered
+/// action spellings ("expiration" and legacy "expiration date").
+fn expiration_date(d: &Domain) -> String {
+    d.object_common
+        .events
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .find(|e| {
+            e.event_action()
+                .map(|a| {
+                    a.eq_ignore_ascii_case("expiration")
+                        || a.eq_ignore_ascii_case("expiration date")
+                })
+                .unwrap_or(false)
+        })
+        .and_then(|e| e.event_date())
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[tokio::main]
@@ -105,6 +132,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                     protected: false,
                     status: Vec::new(),
                     missing_status: Vec::new(),
+                    expiration_date: String::new(),
                     error: msg,
                 });
                 continue;
@@ -125,6 +153,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                     protected: missing.is_empty(),
                     status,
                     missing_status: missing,
+                    expiration_date: expiration_date(&d),
                     error: String::new(),
                 });
             }
@@ -137,6 +166,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                     protected: false,
                     status: Vec::new(),
                     missing_status: Vec::new(),
+                    expiration_date: String::new(),
                     error: e,
                 });
             }
@@ -145,4 +175,59 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
 
     output::write_output(&cli.output, cli.format, &rows)?;
     Ok(errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_domain(events: serde_json::Value) -> Domain {
+        serde_json::from_value(serde_json::json!({
+            "objectClassName": "domain",
+            "ldhName": "example.com",
+            "status": ["client delete prohibited"],
+            "events": events
+        }))
+        .expect("test domain deserializes")
+    }
+
+    #[test]
+    fn expiration_event_date_is_extracted() {
+        let d = test_domain(serde_json::json!([
+            {"eventAction": "registration", "eventDate": "2020-01-01T00:00:00Z"},
+            {"eventAction": "expiration", "eventDate": "2027-06-30T23:59:59Z"}
+        ]));
+        assert_eq!(expiration_date(&d), "2027-06-30T23:59:59Z");
+    }
+
+    #[test]
+    fn legacy_expiration_date_action_is_matched() {
+        let d = test_domain(serde_json::json!([
+            {"eventAction": "Expiration Date", "eventDate": "2026-12-31T12:00:00Z"}
+        ]));
+        assert_eq!(expiration_date(&d), "2026-12-31T12:00:00Z");
+    }
+
+    #[test]
+    fn missing_events_yield_empty_expiration() {
+        let d = test_domain(serde_json::json!([]));
+        assert_eq!(expiration_date(&d), "");
+    }
+
+    #[test]
+    fn csv_row_joins_status_arrays_with_pipe() {
+        let row = ProtectedDomainRow {
+            domain: "example.com".to_string(),
+            registrar: "reg".to_string(),
+            protected: false,
+            status: vec!["a b".to_string(), "c d".to_string()],
+            missing_status: vec!["x y".to_string()],
+            expiration_date: "2027-06-30T23:59:59Z".to_string(),
+            error: String::new(),
+        };
+        let r = row.row();
+        assert_eq!(r[3], "a b|c d");
+        assert_eq!(r[4], "x y");
+        assert_eq!(r[5], "2027-06-30T23:59:59Z");
+    }
 }

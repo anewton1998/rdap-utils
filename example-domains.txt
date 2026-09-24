@@ -1,0 +1,5 @@
+icann.org
+arin.net
+nic.de
+in-addr.arpa
+godaddy.com
