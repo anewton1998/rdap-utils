@@ -18,7 +18,10 @@ pub struct RdapContext {
 impl RdapContext {
     /// Creates a new context with default client configuration.
     pub fn new() -> Result<Self, String> {
-        let config = ClientConfig::default();
+        let config = ClientConfig::default()
+            .from_config()
+            .user_agent_suffix("rdap-utils")
+            .build();
         let client =
             create_client(&config).map_err(|e| format!("failed to create HTTP client: {e}"))?;
         Ok(Self {
