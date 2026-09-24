@@ -9,10 +9,10 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use icann_rdap_common::response::{Network, ObjectCommonFields};
+use icann_rdap_common::response::ObjectCommonFields;
 use rdap_utils::input;
 use rdap_utils::output::{self, OutputFormat, Record};
-use rdap_utils::rdap::RdapContext;
+use rdap_utils::rdap::{RdapContext, cidr_blocks};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -71,15 +71,6 @@ impl Record for IpNetworkRow {
             self.error.clone(),
         ]
     }
-}
-
-/// All CIDR blocks from the registry's `cidr0_cidrs` extension, each as
-/// `prefix/length`. Empty when the registry does not provide the extension.
-fn cidr_blocks(net: &Network) -> Vec<String> {
-    net.cidr0_cidrs
-        .as_ref()
-        .map(|cs| cs.iter().map(ToString::to_string).collect())
-        .unwrap_or_default()
 }
 
 #[tokio::main]
@@ -145,6 +136,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use icann_rdap_common::response::Network;
 
     fn test_network(cidr0: serde_json::Value) -> Network {
         serde_json::from_value(serde_json::json!({

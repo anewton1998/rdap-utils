@@ -7,7 +7,7 @@ and [`icann-rdap-common`](https://crates.io/crates/icann-rdap-common), with buil
 |---|---|---|
 | `find-ip-networks` | Resolve each IP address to its registered network: handle, start/end addresses, and all CIDR blocks from the RIR `cidr0_cidrs` extension (pipe-separated in CSV, array in JSON) | IP addresses |
 | `find-protected-domains` | Verify each domain is "locked" (has `client delete/transfer/update prohibited` statuses) and report its registrar | Domain names |
-| `networks-of-nameservers` | Find the IP network containing each of a domain's nameserver IPs | Domain names |
+| `networks-of-nameservers` | Find the IP network containing each of a domain's nameserver IPs (handle, start/end addresses, CIDR blocks; falls back to an RDAP nameserver lookup when the domain document lacks NS IPs) | Domain names |
 
 ## Build
 

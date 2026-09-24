@@ -3,7 +3,7 @@
 //!
 //! For every input domain an RDAP bootstrap query returns its nameservers;
 //! for every IP address listed on a nameserver a second RDAP query returns
-//! the containing network (start/end addresses). When the domain document
+//! the containing network (handle, start/end addresses, CIDR blocks). When the domain document
 //! does not list IP addresses for a nameserver, a dedicated RDAP nameserver
 //! lookup by name is used as a fallback. Rows that fail carry the error in
 //! the last column; processing always continues with the next row.
@@ -11,9 +11,10 @@
 use std::process::ExitCode;
 
 use clap::Parser;
+use icann_rdap_common::response::ObjectCommonFields;
 use rdap_utils::input;
 use rdap_utils::output::{self, OutputFormat, Record};
-use rdap_utils::rdap::{RdapContext, nameserver_ips, nameserver_name};
+use rdap_utils::rdap::{RdapContext, cidr_blocks, nameserver_ips, nameserver_name};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -45,8 +46,11 @@ struct NsNetworkRow {
     domain: String,
     nameserver: String,
     ip: String,
+    handle: String,
     start_address: String,
     end_address: String,
+    /// All CIDR blocks from the registry's `cidr0_cidrs` extension (empty if absent).
+    cidr_blocks: Vec<String>,
     error: String,
 }
 
@@ -55,8 +59,10 @@ impl Record for NsNetworkRow {
         "domain",
         "nameserver",
         "ip",
+        "handle",
         "start_address",
         "end_address",
+        "cidr_blocks",
         "error",
     ];
 
@@ -65,8 +71,11 @@ impl Record for NsNetworkRow {
             self.domain.clone(),
             self.nameserver.clone(),
             self.ip.clone(),
+            self.handle.clone(),
             self.start_address.clone(),
             self.end_address.clone(),
+            // pipe-separated in CSV; serialized as a JSON array otherwise
+            self.cidr_blocks.join("|"),
             self.error.clone(),
         ]
     }
@@ -96,8 +105,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                     domain: String::new(),
                     nameserver: String::new(),
                     ip: String::new(),
+                    handle: String::new(),
                     start_address: String::new(),
                     end_address: String::new(),
+                    cidr_blocks: Vec::new(),
                     error: msg,
                 });
                 continue;
@@ -112,8 +123,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                     domain,
                     nameserver: String::new(),
                     ip: String::new(),
+                    handle: String::new(),
                     start_address: String::new(),
                     end_address: String::new(),
+                    cidr_blocks: Vec::new(),
                     error: e,
                 });
             }
@@ -127,8 +140,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                         domain,
                         nameserver: String::new(),
                         ip: String::new(),
+                        handle: String::new(),
                         start_address: String::new(),
                         end_address: String::new(),
+                        cidr_blocks: Vec::new(),
                         error: msg,
                     });
                     continue;
@@ -150,8 +165,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                                     domain: domain.clone(),
                                     nameserver: name,
                                     ip: String::new(),
+                                    handle: String::new(),
                                     start_address: String::new(),
                                     end_address: String::new(),
+                                    cidr_blocks: Vec::new(),
                                     error: format!(
                                         "no IP addresses in domain response; nameserver lookup failed: {e}"
                                     ),
@@ -169,8 +186,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                             domain: domain.clone(),
                             nameserver: name,
                             ip: String::new(),
+                            handle: String::new(),
                             start_address: String::new(),
                             end_address: String::new(),
+                            cidr_blocks: Vec::new(),
                             error: msg,
                         });
                         continue;
@@ -181,8 +200,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                                 domain: domain.clone(),
                                 nameserver: name.clone(),
                                 ip,
+                                handle: net.handle().unwrap_or_default().to_string(),
                                 start_address: net.start_address.clone().unwrap_or_default(),
                                 end_address: net.end_address.clone().unwrap_or_default(),
+                                cidr_blocks: cidr_blocks(&net),
                                 error: String::new(),
                             }),
                             Err(e) => {
@@ -192,8 +213,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                                     domain: domain.clone(),
                                     nameserver: name.clone(),
                                     ip,
+                                    handle: String::new(),
                                     start_address: String::new(),
                                     end_address: String::new(),
+                                    cidr_blocks: Vec::new(),
                                     error: e,
                                 });
                             }
@@ -206,4 +229,43 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
 
     output::write_output(&cli.output, cli.format, &rows)?;
     Ok(errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csv_row_joins_cidr_blocks_with_pipe() {
+        let row = NsNetworkRow {
+            domain: "example.com".to_string(),
+            nameserver: "ns1.example.net".to_string(),
+            ip: "192.0.2.53".to_string(),
+            handle: "NET-TEST".to_string(),
+            start_address: "192.0.2.0".to_string(),
+            end_address: "192.0.2.255".to_string(),
+            cidr_blocks: vec!["192.0.2/24".to_string(), "198.51.100/24".to_string()],
+            error: String::new(),
+        };
+        let r = row.row();
+        assert_eq!(r[3], "NET-TEST");
+        assert_eq!(r[6], "192.0.2/24|198.51.100/24");
+    }
+
+    #[test]
+    fn json_row_serializes_cidr_blocks_as_array() {
+        let row = NsNetworkRow {
+            domain: "example.com".to_string(),
+            nameserver: "ns1.example.net".to_string(),
+            ip: "192.0.2.53".to_string(),
+            handle: "NET-TEST".to_string(),
+            start_address: "192.0.2.0".to_string(),
+            end_address: "192.0.2.255".to_string(),
+            cidr_blocks: vec!["192.0.2/24".to_string()],
+            error: String::new(),
+        };
+        let v = serde_json::to_value(&row).unwrap();
+        assert_eq!(v["handle"], "NET-TEST");
+        assert_eq!(v["cidr_blocks"], serde_json::json!(["192.0.2/24"]));
+    }
 }

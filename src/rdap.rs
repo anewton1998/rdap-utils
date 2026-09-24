@@ -100,6 +100,15 @@ impl RdapContext {
     }
 }
 
+/// All CIDR blocks from a network's `cidr0_cidrs` extension, each as
+/// `prefix/length`. Empty when the registry does not provide the extension.
+pub fn cidr_blocks(net: &Network) -> Vec<String> {
+    net.cidr0_cidrs
+        .as_ref()
+        .map(|cs| cs.iter().map(ToString::to_string).collect())
+        .unwrap_or_default()
+}
+
 /// The display name of a nameserver (`ldhName`, falling back to `unicodeName`).
 pub fn nameserver_name(ns: &Nameserver) -> String {
     ns.ldh_name
