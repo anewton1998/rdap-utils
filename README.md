@@ -5,7 +5,7 @@ and [`icann-rdap-common`](https://crates.io/crates/icann-rdap-common), with buil
 
 | Binary | Purpose | Input items |
 |---|---|---|
-| `find-ip-networks` | Resolve each IP address to its registered network (start/end addresses + CIDR block from the RIR `cidr0_cidrs` extension) | IP addresses |
+| `find-ip-networks` | Resolve each IP address to its registered network: handle, start/end addresses, and all CIDR blocks from the RIR `cidr0_cidrs` extension (pipe-separated in CSV, array in JSON) | IP addresses |
 | `find-protected-domains` | Verify each domain is "locked" (has `client delete/transfer/update prohibited` statuses) and report its registrar | Domain names |
 | `networks-of-nameservers` | Find the IP network containing each of a domain's nameserver IPs | Domain names |
 
@@ -51,8 +51,8 @@ failed domain lookup produces a single row with only `domain` + `error`.
 # plain text input, CSV to stdout
 echo "199.43.0.0" > ips.txt
 find-ip-networks -i ips.txt
-# ip,start_address,end_address,cidr_block,error
-# 199.43.0.0,199.43.0.0,199.43.0.255,199.43.0.0/24,
+# ip,handle,start_address,end_address,cidr_blocks,error
+# 199.43.0.0,NET-199-43-0-0,199.43.0.0,199.43.0.255,199.43.0.0/24,
 
 # CSV input picking the column by name; JSON array to a file
 find-protected-domains -i domains.csv --column domain --format json -o report.json

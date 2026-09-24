@@ -9,7 +9,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use icann_rdap_common::response::Network;
+use icann_rdap_common::response::{Network, ObjectCommonFields};
 use rdap_utils::input;
 use rdap_utils::output::{self, OutputFormat, Record};
 use rdap_utils::rdap::RdapContext;
@@ -42,33 +42,43 @@ struct Cli {
 #[derive(Serialize)]
 struct IpNetworkRow {
     ip: String,
+    handle: String,
     start_address: String,
     end_address: String,
-    cidr_block: String,
+    /// All CIDR blocks from the registry's `cidr0_cidrs` extension (empty if absent).
+    cidr_blocks: Vec<String>,
     error: String,
 }
 
 impl Record for IpNetworkRow {
-    const HEADER: &'static [&'static str] =
-        &["ip", "start_address", "end_address", "cidr_block", "error"];
+    const HEADER: &'static [&'static str] = &[
+        "ip",
+        "handle",
+        "start_address",
+        "end_address",
+        "cidr_blocks",
+        "error",
+    ];
 
     fn row(&self) -> Vec<String> {
         vec![
             self.ip.clone(),
+            self.handle.clone(),
             self.start_address.clone(),
             self.end_address.clone(),
-            self.cidr_block.clone(),
+            // pipe-separated in CSV; serialized as a JSON array otherwise
+            self.cidr_blocks.join("|"),
             self.error.clone(),
         ]
     }
 }
 
-/// Formats the first `cidr0_cidrs` entry as `prefix/length`, if present.
-fn cidr_block(net: &Network) -> String {
+/// All CIDR blocks from the registry's `cidr0_cidrs` extension, each as
+/// `prefix/length`. Empty when the registry does not provide the extension.
+fn cidr_blocks(net: &Network) -> Vec<String> {
     net.cidr0_cidrs
         .as_ref()
-        .and_then(|c| c.first())
-        .map(|c| c.to_string())
+        .map(|cs| cs.iter().map(ToString::to_string).collect())
         .unwrap_or_default()
 }
 
@@ -94,9 +104,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                 eprintln!("warn: {msg}");
                 rows.push(IpNetworkRow {
                     ip: String::new(),
+                    handle: String::new(),
                     start_address: String::new(),
                     end_address: String::new(),
-                    cidr_block: String::new(),
+                    cidr_blocks: Vec::new(),
                     error: msg,
                 });
                 continue;
@@ -106,9 +117,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
         match ctx.network(&ip).await {
             Ok(net) => rows.push(IpNetworkRow {
                 ip: ip.clone(),
+                handle: net.handle().unwrap_or_default().to_string(),
                 start_address: net.start_address.clone().unwrap_or_default(),
                 end_address: net.end_address.clone().unwrap_or_default(),
-                cidr_block: cidr_block(&net),
+                cidr_blocks: cidr_blocks(&net),
                 error: String::new(),
             }),
             Err(e) => {
@@ -116,9 +128,10 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                 eprintln!("warn: {ip}: {e}");
                 rows.push(IpNetworkRow {
                     ip,
+                    handle: String::new(),
                     start_address: String::new(),
                     end_address: String::new(),
-                    cidr_block: String::new(),
+                    cidr_blocks: Vec::new(),
                     error: e,
                 });
             }
@@ -127,4 +140,65 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
 
     output::write_output(&cli.output, cli.format, &rows)?;
     Ok(errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_network(cidr0: serde_json::Value) -> Network {
+        serde_json::from_value(serde_json::json!({
+            "objectClassName": "ip network",
+            "handle": "NET-TEST",
+            "startAddress": "10.0.0.0",
+            "endAddress": "10.255.255.255",
+            "cidr0_cidrs": cidr0
+        }))
+        .expect("test network deserializes")
+    }
+
+    #[test]
+    fn all_cidr_blocks_are_reported() {
+        let net = test_network(serde_json::json!([
+            {"v4prefix": "10.0", "length": 8},
+            {"v4prefix": "10.128", "length": 7}
+        ]));
+        assert_eq!(
+            cidr_blocks(&net),
+            vec!["10.0/8".to_string(), "10.128/7".to_string()]
+        );
+    }
+
+    #[test]
+    fn missing_cidr0_extension_yields_empty_list() {
+        let net = test_network(serde_json::json!([]));
+        assert!(cidr_blocks(&net).is_empty());
+    }
+
+    #[test]
+    fn csv_row_joins_cidr_blocks_with_pipe() {
+        let row = IpNetworkRow {
+            ip: "10.1.2.3".to_string(),
+            handle: "NET-TEST".to_string(),
+            start_address: "10.0.0.0".to_string(),
+            end_address: "10.255.255.255".to_string(),
+            cidr_blocks: vec!["10.0/8".to_string(), "10.128/7".to_string()],
+            error: String::new(),
+        };
+        assert_eq!(row.row()[4], "10.0/8|10.128/7");
+    }
+
+    #[test]
+    fn json_row_serializes_cidr_blocks_as_array() {
+        let row = IpNetworkRow {
+            ip: "10.1.2.3".to_string(),
+            handle: "NET-TEST".to_string(),
+            start_address: "10.0.0.0".to_string(),
+            end_address: "10.255.255.255".to_string(),
+            cidr_blocks: vec!["10.0/8".to_string(), "10.128/7".to_string()],
+            error: String::new(),
+        };
+        let v = serde_json::to_value(&row).unwrap();
+        assert_eq!(v["cidr_blocks"], serde_json::json!(["10.0/8", "10.128/7"]));
+    }
 }
