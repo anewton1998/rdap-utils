@@ -6,7 +6,7 @@
 use icann_rdap_client::http::Client;
 use icann_rdap_client::prelude::*;
 use icann_rdap_client::rdap::ResponseData;
-use icann_rdap_common::response::{Domain, Nameserver, Network, RdapResponse};
+use icann_rdap_common::response::{Domain, Entity, Nameserver, Network, RdapResponse};
 
 /// Shared RDAP client + bootstrap store. Create one per process and reuse it
 /// for all queries so the IANA bootstrap registries are fetched only once.
@@ -109,6 +109,38 @@ pub fn cidr_blocks(net: &Network) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Finds the first entity (top level) whose roles include `role` and returns
+/// a contact name from its subtree: its own vCard full name, then organization
+/// name, then the same from any nested entities. Empty when absent.
+fn entity_name_in(entities: Option<&Vec<Entity>>, role: &str) -> Option<String> {
+    let entity = entities?
+        .iter()
+        .find(|e| e.roles().iter().any(|r| r.eq_ignore_ascii_case(role)))?;
+
+    // Depth-first search of the entity's subtree for a usable contact name.
+    let mut stack: Vec<&Entity> = vec![entity];
+    while let Some(e) = stack.pop() {
+        if let Some(name) = e
+            .contact()
+            .and_then(|c| c.full_name().map(str::to_string))
+            .or_else(|| {
+                e.contact()
+                    .and_then(|c| c.organization_name().map(str::to_string))
+            })
+        {
+            return Some(name);
+        }
+        stack.extend(e.object_common.entities.as_deref().unwrap_or_default());
+    }
+    None
+}
+
+/// The registrant name of a network: the entity with the `registrant` role.
+/// Empty when the registry reports no registrant (common for RIR allocations).
+pub fn registrant_name(net: &Network) -> String {
+    entity_name_in(net.object_common.entities.as_ref(), "registrant").unwrap_or_default()
+}
+
 /// The display name of a nameserver (`ldhName`, falling back to `unicodeName`).
 pub fn nameserver_name(ns: &Nameserver) -> String {
     ns.ldh_name
@@ -167,5 +199,66 @@ fn describe_error(e: RdapClientError) -> String {
             info.http_data.status_code, info.http_data.host
         ),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_network(entities: serde_json::Value) -> Network {
+        serde_json::from_value(serde_json::json!({
+            "objectClassName": "ip network",
+            "handle": "NET-TEST",
+            "startAddress": "10.0.0.0",
+            "endAddress": "10.255.255.255",
+            "entities": entities
+        }))
+        .expect("test network deserializes")
+    }
+
+    #[test]
+    fn registrant_name_from_own_vcard() {
+        let net = test_network(serde_json::json!([
+            {
+                "objectClassName": "entity",
+                "roles": ["registrant"],
+                "vcardArray": [
+                    "vcard",
+                    [["fn", {}, "text", "Example Registrant"]]
+                ]
+            }
+        ]));
+        assert_eq!(registrant_name(&net), "Example Registrant");
+    }
+
+    #[test]
+    fn registrant_name_from_nested_entity() {
+        let net = test_network(serde_json::json!([
+            {
+                "objectClassName": "entity",
+                "roles": ["registrant"],
+                "entities": [
+                    {
+                        "objectClassName": "entity",
+                        "roles": ["administrative"],
+                        "vcardArray": ["vcard", [["org", {}, "text", "Nested Org"]]]
+                    }
+                ]
+            }
+        ]));
+        assert_eq!(registrant_name(&net), "Nested Org");
+    }
+
+    #[test]
+    fn missing_registrant_yields_empty() {
+        let net = test_network(serde_json::json!([
+            {
+                "objectClassName": "entity",
+                "roles": ["administrative"],
+                "vcardArray": [["fn", {}, "text", "Some Admin"]]
+            }
+        ]));
+        assert_eq!(registrant_name(&net), "");
     }
 }

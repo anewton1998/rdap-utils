@@ -12,7 +12,7 @@ use clap::Parser;
 use icann_rdap_common::response::ObjectCommonFields;
 use rdap_utils::input;
 use rdap_utils::output::{self, OutputFormat, Record};
-use rdap_utils::rdap::{RdapContext, cidr_blocks};
+use rdap_utils::rdap::{RdapContext, cidr_blocks, registrant_name};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -43,6 +43,8 @@ struct Cli {
 struct IpNetworkRow {
     ip: String,
     handle: String,
+    /// Name of the network's registrant (empty when not reported).
+    registrant: String,
     start_address: String,
     end_address: String,
     /// All CIDR blocks from the registry's `cidr0_cidrs` extension (empty if absent).
@@ -54,6 +56,7 @@ impl Record for IpNetworkRow {
     const HEADER: &'static [&'static str] = &[
         "ip",
         "handle",
+        "registrant",
         "start_address",
         "end_address",
         "cidr_blocks",
@@ -64,6 +67,7 @@ impl Record for IpNetworkRow {
         vec![
             self.ip.clone(),
             self.handle.clone(),
+            self.registrant.clone(),
             self.start_address.clone(),
             self.end_address.clone(),
             // pipe-separated in CSV; serialized as a JSON array otherwise
@@ -96,6 +100,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                 rows.push(IpNetworkRow {
                     ip: String::new(),
                     handle: String::new(),
+                    registrant: String::new(),
                     start_address: String::new(),
                     end_address: String::new(),
                     cidr_blocks: Vec::new(),
@@ -109,6 +114,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
             Ok(net) => rows.push(IpNetworkRow {
                 ip: ip.clone(),
                 handle: net.handle().unwrap_or_default().to_string(),
+                registrant: registrant_name(&net),
                 start_address: net.start_address.clone().unwrap_or_default(),
                 end_address: net.end_address.clone().unwrap_or_default(),
                 cidr_blocks: cidr_blocks(&net),
@@ -120,6 +126,7 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                 rows.push(IpNetworkRow {
                     ip,
                     handle: String::new(),
+                    registrant: String::new(),
                     start_address: String::new(),
                     end_address: String::new(),
                     cidr_blocks: Vec::new(),
@@ -172,12 +179,13 @@ mod tests {
         let row = IpNetworkRow {
             ip: "10.1.2.3".to_string(),
             handle: "NET-TEST".to_string(),
+            registrant: String::new(),
             start_address: "10.0.0.0".to_string(),
             end_address: "10.255.255.255".to_string(),
             cidr_blocks: vec!["10.0/8".to_string(), "10.128/7".to_string()],
             error: String::new(),
         };
-        assert_eq!(row.row()[4], "10.0/8|10.128/7");
+        assert_eq!(row.row()[5], "10.0/8|10.128/7");
     }
 
     #[test]
@@ -185,6 +193,7 @@ mod tests {
         let row = IpNetworkRow {
             ip: "10.1.2.3".to_string(),
             handle: "NET-TEST".to_string(),
+            registrant: String::new(),
             start_address: "10.0.0.0".to_string(),
             end_address: "10.255.255.255".to_string(),
             cidr_blocks: vec!["10.0/8".to_string(), "10.128/7".to_string()],
