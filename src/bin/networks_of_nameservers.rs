@@ -3,8 +3,10 @@
 //!
 //! For every input domain an RDAP bootstrap query returns its nameservers;
 //! for every IP address listed on a nameserver a second RDAP query returns
-//! the containing network (start/end addresses). Rows that fail carry the
-//! error in the last column; processing always continues with the next row.
+//! the containing network (start/end addresses). When the domain document
+//! does not list IP addresses for a nameserver, a dedicated RDAP nameserver
+//! lookup by name is used as a fallback. Rows that fail carry the error in
+//! the last column; processing always continues with the next row.
 
 use std::process::ExitCode;
 
@@ -133,7 +135,32 @@ async fn run(cli: Cli) -> anyhow::Result<usize> {
                 }
                 for ns in &nss {
                     let name = nameserver_name(ns);
-                    let ips = nameserver_ips(ns);
+                    let mut ips = nameserver_ips(ns);
+
+                    // The domain document did not list IP addresses for this
+                    // nameserver: fall back to a dedicated RDAP nameserver
+                    // lookup by name.
+                    if ips.is_empty() && !name.is_empty() {
+                        match ctx.nameserver(&name).await {
+                            Ok(found) => ips = nameserver_ips(&found),
+                            Err(e) => {
+                                errors += 1;
+                                eprintln!("warn: {domain} ({name}): {e}");
+                                rows.push(NsNetworkRow {
+                                    domain: domain.clone(),
+                                    nameserver: name,
+                                    ip: String::new(),
+                                    start_address: String::new(),
+                                    end_address: String::new(),
+                                    error: format!(
+                                        "no IP addresses in domain response; nameserver lookup failed: {e}"
+                                    ),
+                                });
+                                continue;
+                            }
+                        }
+                    }
+
                     if ips.is_empty() {
                         errors += 1;
                         let msg = "nameserver has no IP addresses".to_string();

@@ -56,6 +56,19 @@ impl RdapContext {
         }
     }
 
+    /// Looks up a nameserver by name and returns the parsed RDAP nameserver
+    /// object. Used as a fallback when a domain document lists a nameserver
+    /// without its IP addresses.
+    pub async fn nameserver(&self, name: &str) -> Result<Nameserver, String> {
+        let query =
+            QueryType::ns(name).map_err(|e| format!("invalid nameserver name '{name}': {e}"))?;
+        let data = self.request(&query).await?;
+        match data.rdap {
+            RdapResponse::Nameserver(n) => Ok(*n),
+            other => Err(self.unexpected(name, other)),
+        }
+    }
+
     /// Parses an IP address or CIDR block into a query type.
     fn ip_query(ip: &str) -> Result<QueryType, String> {
         QueryType::ipv4(ip)
