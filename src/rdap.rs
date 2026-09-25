@@ -111,13 +111,23 @@ pub fn cidr_blocks(net: &Network) -> Vec<String> {
 
 /// Finds the first entity (top level) whose roles include `role` and returns
 /// a contact name from its subtree: its own vCard full name, then organization
-/// name, then the same from any nested entities. Empty when absent.
+/// Finds the first entity (at any depth, document order) whose roles include
+/// `role` and returns a contact name from its subtree: its own vCard full
+/// name, then organization name, then the same from any nested entities.
 fn entity_name_in(entities: Option<&Vec<Entity>>, role: &str) -> Option<String> {
-    let entity = entities?
-        .iter()
-        .find(|e| e.roles().iter().any(|r| r.eq_ignore_ascii_case(role)))?;
+    // Depth-first search (document order) for an entity carrying the role.
+    let mut stack: Vec<&Entity> = entities.map(|es| es.iter()).unwrap_or_default().collect();
+    let mut found = None;
+    while let Some(e) = stack.pop() {
+        if e.roles().iter().any(|r| r.eq_ignore_ascii_case(role)) {
+            found = Some(e);
+            break;
+        }
+        push_children(&mut stack, e);
+    }
+    let entity = found?;
 
-    // Depth-first search of the entity's subtree for a usable contact name.
+    // Then the first usable contact name within its subtree.
     let mut stack: Vec<&Entity> = vec![entity];
     while let Some(e) = stack.pop() {
         if let Some(name) = e
@@ -130,15 +140,35 @@ fn entity_name_in(entities: Option<&Vec<Entity>>, role: &str) -> Option<String> 
         {
             return Some(name);
         }
-        stack.extend(e.object_common.entities.as_deref().unwrap_or_default());
+        push_children(&mut stack, e);
     }
     None
+}
+
+/// Pushes an entity's nested entities onto the stack in reverse so a depth-
+/// first walk visits children in document order.
+fn push_children<'a>(stack: &mut Vec<&'a Entity>, e: &'a Entity) {
+    let children: Vec<&Entity> = e
+        .object_common
+        .entities
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .collect();
+    stack.extend(children);
+}
+
+/// The contact name of the first entity (at any depth) with the given role,
+/// e.g. `abuse`, `administrative` or `technical`. Empty when absent.
+pub fn entity_name(entities: Option<&Vec<Entity>>, role: &str) -> String {
+    entity_name_in(entities, role).unwrap_or_default()
 }
 
 /// The registrant name of a network: the entity with the `registrant` role.
 /// Empty when the registry reports no registrant (common for RIR allocations).
 pub fn registrant_name(net: &Network) -> String {
-    entity_name_in(net.object_common.entities.as_ref(), "registrant").unwrap_or_default()
+    entity_name(net.object_common.entities.as_ref(), "registrant")
 }
 
 /// The display name of a nameserver (`ldhName`, falling back to `unicodeName`).
@@ -248,6 +278,38 @@ mod tests {
             }
         ]));
         assert_eq!(registrant_name(&net), "Nested Org");
+    }
+
+    #[test]
+    fn entity_name_finds_nested_role_entity() {
+        let net = test_network(serde_json::json!([
+            {
+                "objectClassName": "entity",
+                "roles": ["registrant"],
+                "vcardArray": [
+                    "vcard",
+                    [["fn", {}, "text", "Example Registrant"]]
+                ],
+                "entities": [
+                    {
+                        "objectClassName": "entity",
+                        "roles": ["abuse"],
+                        "vcardArray": [
+                            "vcard",
+                            [["fn", {}, "text", "Abuse Contact"]]
+                        ]
+                    }
+                ]
+            }
+        ]));
+        assert_eq!(
+            entity_name(net.object_common.entities.as_ref(), "abuse"),
+            "Abuse Contact"
+        );
+        assert_eq!(
+            entity_name(net.object_common.entities.as_ref(), "administrative"),
+            ""
+        );
     }
 
     #[test]
