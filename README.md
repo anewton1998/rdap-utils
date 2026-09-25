@@ -1,6 +1,8 @@
 # rdap-utils
 
-Three RDAP command-line tools built on [`icann-rdap-client`](https://crates.io/crates/icann-rdap-client)
+Three bulk RDAP tools. They read data from text or CSV files, process RDAP queries, and outpu the
+results as CSV, JSON, ND-JSON (JSON lines), or JSON Sequences (RFC7464).
+These are built on [`icann-rdap-client`](https://crates.io/crates/icann-rdap-client)
 and [`icann-rdap-common`](https://crates.io/crates/icann-rdap-common), with built-in IANA bootstrapping.
 
 | Binary | Purpose | Input items |
@@ -8,6 +10,10 @@ and [`icann-rdap-common`](https://crates.io/crates/icann-rdap-common), with buil
 | `find-ip-networks` | Resolve each IP address to its registered network: handle, name, registrant/abuse/administrative/technical contacts, start/end addresses, and all CIDR blocks from the RIR `cidr0_cidrs` extension (pipe-separated in CSV, array in JSON) | IP addresses |
 | `find-protected-domains` | Verify each domain is "protected" (has `client delete/transfer/update prohibited` statuses) and report its registrar | Domain names |
 | `networks-of-nameservers` | Find the IP network containing each of a domain's nameserver IPs (handle, name, registrant/abuse/administrative/technical contacts, start/end addresses, CIDR blocks; falls back to an RDAP nameserver lookup when the domain document lacks NS IPs) | Domain names |
+
+## Install
+
+Binaries can be downloaded from the [release page](https://github.com/anewton1998/rdap-utils/releases) (RECOMMENDED) or built using the Rust `cargo` command (see below).
 
 ## Common options (all three binaries)
 
