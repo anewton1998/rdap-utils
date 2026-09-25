@@ -1,22 +1,13 @@
 # rdap-utils
 
-Three small RDAP command-line tools built on [`icann-rdap-client`](https://crates.io/crates/icann-rdap-client)
+Three RDAP command-line tools built on [`icann-rdap-client`](https://crates.io/crates/icann-rdap-client)
 and [`icann-rdap-common`](https://crates.io/crates/icann-rdap-common), with built-in IANA bootstrapping.
 
 | Binary | Purpose | Input items |
 |---|---|---|
 | `find-ip-networks` | Resolve each IP address to its registered network: handle, name, registrant/abuse/administrative/technical contacts, start/end addresses, and all CIDR blocks from the RIR `cidr0_cidrs` extension (pipe-separated in CSV, array in JSON) | IP addresses |
-| `find-protected-domains` | Verify each domain is "locked" (has `client delete/transfer/update prohibited` statuses) and report its registrar | Domain names |
+| `find-protected-domains` | Verify each domain is "protected" (has `client delete/transfer/update prohibited` statuses) and report its registrar | Domain names |
 | `networks-of-nameservers` | Find the IP network containing each of a domain's nameserver IPs (handle, name, registrant/abuse/administrative/technical contacts, start/end addresses, CIDR blocks; falls back to an RDAP nameserver lookup when the domain document lacks NS IPs) | Domain names |
-
-## Build
-
-```sh
-cargo build --release
-```
-
-Binaries land in `target/release/`: `find-ip-networks`, `find-protected-domains`,
-`networks-of-nameservers`.
 
 ## Common options (all three binaries)
 
@@ -51,8 +42,8 @@ failed domain lookup produces a single row with only `domain` + `error`.
 # plain text input, CSV to stdout
 echo "199.43.0.0" > ips.txt
 find-ip-networks -i ips.txt
-# ip,handle,start_address,end_address,cidr_blocks,error
-# 199.43.0.0,NET-199-43-0-0,199.43.0.0,199.43.0.255,199.43.0.0/24,
+# ip,handle,network_name,registrant,abuse,administrative,technical,start_address,end_address,cidr_blocks,error                                              
+# 199.43.0.0,NET-199-43-0-0-1,ARIN-ASH,ARIN Operations,ARIN Operations Abuse,Mark Kosters,Pete Toscano,199.43.0.0,199.43.0.255,199.43.0.0/24,
 
 # CSV input picking the column by name; JSON array to a file
 find-protected-domains -i domains.csv --column domain --format json -o report.json
@@ -63,6 +54,14 @@ cat domains.txt | networks-of-nameservers -i - --format ndjson
 # RFC 7464 JSON sequence (0x1F prefix, 0x1E separators)
 find-ip-networks -i ips.txt --format jsonseq > ip_inventory.jsonseq
 ```
+## Build
+
+```sh
+cargo build --release
+```
+
+Binaries land in `target/release/`: `find-ip-networks`, `find-protected-domains`,
+`networks-of-nameservers`.
 
 ## Tests
 
